@@ -13,6 +13,11 @@ import java.io.FileReader;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Paths;
+import java.sql.Connection;
+import java.sql.DriverManager;
+import java.sql.ResultSet;
+import java.sql.SQLException;
+import java.sql.Statement;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.logging.Level;
@@ -29,6 +34,32 @@ public class FileSentry {
     
     static File PATH_LIST_INI = new File("path_list.txt").getAbsoluteFile();
     static File FILE_CHECK_LIST = new File(".\\file_check_list.txt");
+    Connection connection = null;
+    
+    public void initDatabase() throws SQLException {
+        
+        connection = DriverManager.getConnection("jdbc:sqlite:filesentry.db");
+        Statement statement = connection.createStatement();
+        statement.setQueryTimeout(30);
+        
+        statement.executeUpdate("drop table if exists notable");
+        
+        String createFileHashesTable = null;
+        
+        createFileHashesTable = "create table if not exists file_hashes";
+        createFileHashesTable += "(file_path text not null,";
+        createFileHashesTable += "file_path_hash text primary key,";
+        createFileHashesTable += "file_bit_hash text not null,";
+        createFileHashesTable += "last_modified text,";
+        createFileHashesTable += "last_modified_by text,";
+        createFileHashesTable += "last_hash_date text)";
+        
+        System.out.println("** " + createFileHashesTable + " **");
+        
+        statement.execute(createFileHashesTable);
+        connection.close();
+        
+    }
     
     public void getPathList() throws FileNotFoundException, IOException {
         
@@ -84,9 +115,15 @@ public class FileSentry {
                 }
             }
             else if (file.exists() && file.isFile()) {
-                checkFile(file);
-                
-                // do file hashing and checking stuff here
+                try {
+                    checkFile(file);
+                    
+                    // do file hashing and checking stuff here
+                } catch (FileNotFoundException ex) {
+                    Logger.getLogger(FileSentry.class.getName()).log(Level.SEVERE, null, ex);
+                } catch (SQLException ex) {
+                    Logger.getLogger(FileSentry.class.getName()).log(Level.SEVERE, null, ex);
+                }
             }
             else {
                 System.out.println("File " + file.getName() + " is not a file or directory, skipping");
@@ -95,7 +132,12 @@ public class FileSentry {
         
     }
     
-    public void checkFile(File fileToCheck) throws FileNotFoundException, IOException {
+    public void checkFile(File fileToCheck) throws FileNotFoundException, IOException, SQLException {
+        
+        
+        connection = DriverManager.getConnection("jdbc:sqlite:filesentry.db");
+        Statement statement = connection.createStatement();
+        statement.setQueryTimeout(30);
         
         
         DigestUtils md = new DigestUtils();
@@ -109,9 +151,22 @@ public class FileSentry {
         };
         
         String fileShaHash = DigestUtils.sha1Hex(dataBytes);
+        String fileNameShaHash = DigestUtils.sha1Hex(fileToCheck.getAbsolutePath());
         
+        ResultSet fileLookupResult = statement.executeQuery("select * from file_hashes where file_path_hash = '" + fileNameShaHash + "'");
         
-        System.out.println("FILE: " + fileToCheck.getAbsolutePath() + " |  HASH: " + fileShaHash);
+        System.out.println(fileLookupResult.toString());
+        
+        /**
+        String updateRecordSql = "replace into file_hashes (file_path, file_path_hash, file_bit_hash, last_hash_date)";
+        updateRecordSql += " values ('" + fileToCheck.getAbsolutePath() + "', '" + fileNameShaHash + "', '" + fileShaHash + "', '2015-06-03')";
+        System.out.println(updateRecordSql);
+        statement.executeUpdate(updateRecordSql);
+        **/
+        
+        System.out.println("FILE: " + fileToCheck.getAbsolutePath());
+        System.out.println(" -- BIT HASH:  " + fileShaHash);
+        System.out.println(" -- NAME HASH: " + fileNameShaHash);
         
     }
 
@@ -123,11 +178,19 @@ public class FileSentry {
         
         FileSentry fileSentry = new FileSentry();
         try {
+            fileSentry.initDatabase();
+        } catch (SQLException ex) {
+            Logger.getLogger(FileSentry.class.getName()).log(Level.SEVERE, null, ex);
+        }
+        
+        
+        try {
             fileSentry.getPathList();
-            System.out.println("Reading path_list.txt...");
+            System.out.println("File hash checking complete.");
         } catch (IOException ex) {
             Logger.getLogger(FileSentry.class.getName()).log(Level.SEVERE, null, ex);
         }
+        
     }
     
 }
