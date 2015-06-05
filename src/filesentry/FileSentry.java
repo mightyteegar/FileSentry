@@ -11,8 +11,6 @@ import java.io.FileInputStream;
 import java.io.FileNotFoundException;
 import java.io.FileReader;
 import java.io.IOException;
-import java.nio.file.Files;
-import java.nio.file.Paths;
 import java.sql.Connection;
 import java.sql.DriverManager;
 import java.sql.ResultSet;
@@ -23,8 +21,6 @@ import java.util.List;
 import java.util.logging.Level;
 import java.util.logging.Logger;
 import org.apache.commons.codec.digest.DigestUtils;
-
-
 
 /**
  *
@@ -61,6 +57,16 @@ public class FileSentry {
         
     }
     
+    public void resetFoundFlags() throws SQLException {
+        connection = DriverManager.getConnection("jdbc:sqlite:filesentry.db");
+        Statement statement = connection.createStatement();
+        
+        String resetFoundFlagsSql = "update file_hashes set flag_file_found = 0 where 1";
+        statement.executeUpdate(resetFoundFlagsSql);
+        statement.close();
+        connection.close();
+    }
+    
     public void getPathList() throws FileNotFoundException, IOException {
         
         System.out.println(PATH_LIST_INI);
@@ -74,18 +80,15 @@ public class FileSentry {
         }
         
         FileReader fileReader = new FileReader(PATH_LIST_INI);
-        BufferedReader bufferedReader = new BufferedReader(fileReader);
-        
-        List<String> listOfPaths = new ArrayList<String>();
-        
-        String line = null;        
-        
-        while ((line = bufferedReader.readLine()) != null ) {
-            System.out.println("Adding path " + line + " to list");
-            listOfPaths.add(line);
+        List<String> listOfPaths;
+        try (BufferedReader bufferedReader = new BufferedReader(fileReader)) {
+            listOfPaths = new ArrayList<>();
+            String line = null;
+            while ((line = bufferedReader.readLine()) != null ) {
+                System.out.println("Adding path " + line + " to list");
+                listOfPaths.add(line);
+            }
         }
-        
-        bufferedReader.close();
         
         for (String pathString : listOfPaths) {
             File filePath = new File(pathString);
@@ -97,9 +100,7 @@ public class FileSentry {
                 walkDirectory(filePath);
             }
             
-        }
-
-       
+        }  
     }
     
     public void walkDirectory(File rootDir) throws IOException {
@@ -110,7 +111,7 @@ public class FileSentry {
                 try {
                     walkDirectory(file);
                 }
-                catch (Exception e) {
+                catch (IOException e) {
                     Logger.getLogger(FileSentry.class.getName()).log(Level.SEVERE, null, e);
                 }
             }
@@ -119,9 +120,7 @@ public class FileSentry {
                     checkFile(file);
                     
                     // do file hashing and checking stuff here
-                } catch (FileNotFoundException ex) {
-                    Logger.getLogger(FileSentry.class.getName()).log(Level.SEVERE, null, ex);
-                } catch (SQLException ex) {
+                } catch (FileNotFoundException | SQLException ex) {
                     Logger.getLogger(FileSentry.class.getName()).log(Level.SEVERE, null, ex);
                 }
             }
@@ -137,7 +136,6 @@ public class FileSentry {
         
         connection = DriverManager.getConnection("jdbc:sqlite:filesentry.db");
         Statement statement = connection.createStatement();
-        statement.setQueryTimeout(30);
         
         
         DigestUtils md = new DigestUtils();
@@ -153,21 +151,63 @@ public class FileSentry {
         String fileShaHash = DigestUtils.sha1Hex(dataBytes);
         String fileNameShaHash = DigestUtils.sha1Hex(fileToCheck.getAbsolutePath());
         
-        ResultSet fileLookupResult = statement.executeQuery("select * from file_hashes where file_path_hash = '" + fileNameShaHash + "'");
+        String findMatchingHashSql = "select * from file_hashes where file_path_hash = '" + fileNameShaHash + "'";
+        ResultSet fileLookupResult = statement.executeQuery(findMatchingHashSql);
         
-        System.out.println(fileLookupResult.toString());
+        String dbFileShaHash = null;
+        String dbFileNameShaHash = null;
+        int match = 0;
+        while (fileLookupResult.next()) {
+            dbFileNameShaHash = fileLookupResult.getString("file_path_hash");
+            dbFileShaHash = fileLookupResult.getString("file_bit_hash");
+            System.out.println("FILE HASH: " + fileNameShaHash + " : DB HASH: " + dbFileNameShaHash);
+            match = 1;
+        }
         
-        /**
-        String updateRecordSql = "replace into file_hashes (file_path, file_path_hash, file_bit_hash, last_hash_date)";
-        updateRecordSql += " values ('" + fileToCheck.getAbsolutePath() + "', '" + fileNameShaHash + "', '" + fileShaHash + "', '2015-06-03')";
-        System.out.println(updateRecordSql);
-        statement.executeUpdate(updateRecordSql);
-        **/
+        if (match > 0) {
+            // File was found in the database, let's check it
+            if (fileShaHash.equals(dbFileShaHash)) {
+                // do nothing because the file matches
+            }
+            else {
+                String flagAsChangedSql = "update file_hashes set flag_as_changed = 1 where file_path_hash = '" + dbFileNameShaHash + "'";
+                try (Statement flagUpdateStmt = connection.createStatement()) {
+                    flagUpdateStmt.executeUpdate(flagAsChangedSql);
+                }
+            }
+        }
+        else {
+            // File was not found in the database, let's add it
+            String updateRecordSql = "insert into file_hashes (file_path, file_path_hash, file_bit_hash, last_hash_date, flag_file_found)";
+            updateRecordSql += " values ('" + fileToCheck.getAbsolutePath() + "', '" + fileNameShaHash + "', '" + fileShaHash + "', '2015-06-03', 1)";
+            System.out.println(updateRecordSql);
+            try (Statement updateStmt = connection.createStatement()) {
+                updateStmt.executeUpdate(updateRecordSql);
+            }
+        }
+        
+        String fileFoundUpdateSql = "update file_hashes set flag_file_found = 1 where file_path_hash = '" + dbFileNameShaHash + "'";
+        Statement fileFoundStmt = connection.createStatement();
+        fileFoundStmt.executeUpdate(fileFoundUpdateSql);
+        fileFoundStmt.close();
+        
         
         System.out.println("FILE: " + fileToCheck.getAbsolutePath());
         System.out.println(" -- BIT HASH:  " + fileShaHash);
         System.out.println(" -- NAME HASH: " + fileNameShaHash);
         
+        statement.close();
+        connection.close();
+    }
+    
+    public void removeDeadFileRecords() throws SQLException {
+        
+        connection = DriverManager.getConnection("jdbc:sqlite:filesentry.db");
+        try (Statement statement = connection.createStatement()) {
+            String deleteDeadRecordsSql = "delete from file_hashes where flag_file_found = 0";
+            statement.executeUpdate(deleteDeadRecordsSql);
+        }
+        connection.close();
     }
 
     /**
@@ -177,19 +217,34 @@ public class FileSentry {
         // TODO code application logic here
         
         FileSentry fileSentry = new FileSentry();
+        /**
         try {
             fileSentry.initDatabase();
         } catch (SQLException ex) {
             Logger.getLogger(FileSentry.class.getName()).log(Level.SEVERE, null, ex);
         }
-        
+        **/
         
         try {
+            try {
+                fileSentry.resetFoundFlags();
+            } catch (SQLException ex) {
+                Logger.getLogger(FileSentry.class.getName()).log(Level.SEVERE, null, ex);
+            }
+            
             fileSentry.getPathList();
             System.out.println("File hash checking complete.");
         } catch (IOException ex) {
             Logger.getLogger(FileSentry.class.getName()).log(Level.SEVERE, null, ex);
         }
+        
+        System.out.println("Deleting records with no matching files...");
+        try {
+            fileSentry.removeDeadFileRecords();
+        } catch (SQLException ex) {
+            Logger.getLogger(FileSentry.class.getName()).log(Level.SEVERE, null, ex);
+        }
+        System.out.println(">> Program complete.");
         
     }
     
