@@ -41,6 +41,7 @@ public class FileSentry {
         statement.executeUpdate("drop table if exists notable");
         
         String createFileHashesTable = null;
+        String createPathListTable = null;
         
         createFileHashesTable = "create table if not exists file_hashes";
         createFileHashesTable += "(file_path text not null,";
@@ -107,11 +108,12 @@ public class FileSentry {
         
         File[] listOfFiles = rootDir.listFiles();
         for (File file : listOfFiles) {
-            if (file.exists() && file.isDirectory()) {
+            System.out.println("** >> DEBUG: Reading file " + file.getAbsolutePath());
+            if (file.exists() && file.isDirectory() && file.canRead()) {
                 try {
                     walkDirectory(file);
                 }
-                catch (IOException e) {
+                catch (IOException | NullPointerException e) {
                     Logger.getLogger(FileSentry.class.getName()).log(Level.SEVERE, null, e);
                 }
             }
@@ -120,12 +122,12 @@ public class FileSentry {
                     checkFile(file);
                     
                     // do file hashing and checking stuff here
-                } catch (FileNotFoundException | SQLException ex) {
+                } catch (FileNotFoundException | SQLException | NullPointerException ex) {
                     Logger.getLogger(FileSentry.class.getName()).log(Level.SEVERE, null, ex);
                 }
             }
             else {
-                System.out.println("File " + file.getName() + " is not a file or directory, skipping");
+                System.out.println("File " + file.getName() + " is not a file or cannot be read, skipping");
             }
         }
         
@@ -144,9 +146,7 @@ public class FileSentry {
         
         int nread = 0; 
  
-        while ((nread = fis.read(dataBytes)) != -1) {
-            
-        };
+        while ((nread = fis.read(dataBytes)) != -1) {};
         
         String fileShaHash = DigestUtils.sha1Hex(dataBytes);
         String fileNameShaHash = DigestUtils.sha1Hex(fileToCheck.getAbsolutePath());
@@ -160,21 +160,21 @@ public class FileSentry {
         while (fileLookupResult.next()) {
             dbFileNameShaHash = fileLookupResult.getString("file_path_hash");
             dbFileShaHash = fileLookupResult.getString("file_bit_hash");
+            System.out.println("FILE PATH: " + fileToCheck.getAbsolutePath());
             System.out.println("FILE HASH: " + fileNameShaHash + " : DB HASH: " + dbFileNameShaHash);
-            match = 1;
+            System.out.println("-------------------------------------------------------------------------------------");
+            match++;
         }
         
         if (match > 0) {
             // File was found in the database, let's check it
-            if (fileShaHash.equals(dbFileShaHash)) {
-                // do nothing because the file matches
-            }
-            else {
+            if (!fileShaHash.equals(dbFileShaHash)) {
                 String flagAsChangedSql = "update file_hashes set flag_as_changed = 1 where file_path_hash = '" + dbFileNameShaHash + "'";
                 try (Statement flagUpdateStmt = connection.createStatement()) {
                     flagUpdateStmt.executeUpdate(flagAsChangedSql);
                 }
             }
+            
         }
         else {
             // File was not found in the database, let's add it
@@ -190,12 +190,7 @@ public class FileSentry {
         Statement fileFoundStmt = connection.createStatement();
         fileFoundStmt.executeUpdate(fileFoundUpdateSql);
         fileFoundStmt.close();
-        
-        
-        System.out.println("FILE: " + fileToCheck.getAbsolutePath());
-        System.out.println(" -- BIT HASH:  " + fileShaHash);
-        System.out.println(" -- NAME HASH: " + fileNameShaHash);
-        
+                
         statement.close();
         connection.close();
     }
