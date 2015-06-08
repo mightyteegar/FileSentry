@@ -151,6 +151,30 @@ public class FileSentry {
         
     }
     
+    public void newSentryOpRecord() throws SQLException {
+        connection = DriverManager.getConnection("jdbc:sqlite:filesentry.db");
+        Statement getOpStmt;
+        String getSentryOpSql;
+        this.setComputerName();
+        try (Statement statement = connection.createStatement()) {
+            getOpStmt = connection.createStatement();
+            String createSentryOpSql = "insert into sentry_ops (computer_name, run_date)"
+                    + "values ('" + this.getComputerName() + "', "
+                    + "'" + getCurrentDateTime() + "')";
+            getSentryOpSql = "select rowid from sentry_ops order by rowid desc limit 1";
+            System.out.println("## DEBUG: " + createSentryOpSql);
+            statement.executeUpdate(createSentryOpSql);
+        }
+        
+        ResultSet rs = getOpStmt.executeQuery(getSentryOpSql);
+        Integer rowId = rs.getInt(1);
+        this.sentryOpId = rowId;  
+        System.out.println("## DEBUG: Sentry Op ID " + rowId); 
+        
+        getOpStmt.close();
+        connection.close();
+    }
+    
     public void logEntry(Map<String,Object> logEntryData) throws SQLException {
         connection = DriverManager.getConnection("jdbc:sqlite:filesentry.db");
         Statement statement = connection.createStatement();
@@ -178,29 +202,6 @@ public class FileSentry {
         String resetFoundFlagsSql = "update file_hashes set flag_file_found = 0 where 1";
         statement.executeUpdate(resetFoundFlagsSql);
         statement.close();
-        connection.close();
-    }
-    
-    public void newSentryOpRecord() throws SQLException {
-        connection = DriverManager.getConnection("jdbc:sqlite:filesentry.db");
-        Statement statement = connection.createStatement();
-        Statement getOpStmt = connection.createStatement();
-        
-        String createSentryOpSql = "insert into sentry_ops (computer_name, run_date)"
-                + "values ('" + this.getComputerName() + "', "
-                + "'" + getCurrentDateTime() + "')";
-        String getSentryOpSql = "select rowid from sentry_ops order by rowid desc limit 1";
-        
-        System.out.println("## DEBUG: " + createSentryOpSql);
-        statement.executeUpdate(createSentryOpSql);
-        statement.close();
-        
-        ResultSet rs = getOpStmt.executeQuery(getSentryOpSql);
-        Integer rowId = rs.getInt(1);
-        this.sentryOpId = rowId;  
-        System.out.println("## DEBUG: Sentry Op ID " + rowId); 
-        
-        getOpStmt.close();
         connection.close();
     }
     
