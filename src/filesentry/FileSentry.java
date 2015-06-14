@@ -120,15 +120,15 @@ public class FileSentry {
                 + "computer_name text,"
                 + "run_date text not null)";
 
-        createFileHashesTable = "create table if not exists file_hashes";
-        createFileHashesTable += "(file_path text not null,";
-        createFileHashesTable += "file_path_hash text primary key,";
-        createFileHashesTable += "file_bit_hash text not null,";
-        createFileHashesTable += "flag_file_found int default 1,";
-        createFileHashesTable += "flag_as_changed int default 0,";
-        createFileHashesTable += "last_modified text,";
-        createFileHashesTable += "last_modified_by text,";
-        createFileHashesTable += "last_hash_date text)";
+        createFileHashesTable = "create table if not exists file_hashes"
+                + "(file_path text not null,"
+                + "file_path_hash text primary key,"
+                + "file_bit_hash text not null,"
+                + "flag_file_found int default 1,"
+                + "flag_as_changed int default 0,"
+                + "last_modified text,"
+                + "last_modified_by text,"
+                + "last_hash_date text)";
 
         createSentryLogTable = "create table if not exists sentry_log"
                 + "(rowid integer primary key,"
